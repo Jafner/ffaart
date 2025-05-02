@@ -84,20 +84,6 @@ main() { # Takes a file path, creates a new file.
     echo "Unknown HWACCEL_MODE $HWACCEL_MODE"; exit 1
   fi
 
-  # Dry run if flagged
-  DRY_RUN=${DRY_RUN:-false}
-  if [[ "$DRY_RUN" == "true" ]]; then
-    echo "RESOLUTION: $SOURCE_RESOLUTION -> ${TARGET_RESOLUTION_X}x${TARGET_RESOLUTION_Y}"
-    echo "FRAMERATE: $SOURCE_FRAMERATE -> $TARGET_FRAMERATE"
-    echo "BITRATE: $(numfmt --to=si --suffix=bps --format="%.1f" "$SOURCE_BITRATE") ($SOURCE_VCODEC) -> $(numfmt --to=si --suffix=bps --format="%.1f" "$TARGET_BITRATE")"
-    TARGET_FILE_SIZE_ESTIMATE="$(( $(stat -c %s "$INPUT_FILE_PATH") * TARGET_BITRATE / SOURCE_BITRATE ))"
-    echo "FILESIZE: \
-      $(numfmt --to=iec --suffix=B --format="%.1f" "$(stat -c %s "$INPUT_FILE_PATH")") -> \
-      $(numfmt --to=iec --suffix=B --format="%.1f" "$TARGET_FILE_SIZE_ESTIMATE") (estimate)"
-    echo "FFMPEG_CMD: $(echo "$FFMPEG_CMD" | tr -s ' ')"
-    exit 0
-  fi
-
   # Prevent unnecessary runs.
   if [[ "$TARGET_FILE_PATH" == "${INPUT_FILE_PATH%.*}.av1.mp4" ]]; then
     if [[
@@ -111,6 +97,19 @@ main() { # Takes a file path, creates a new file.
     fi
   fi
 
+  # Dry run if flagged
+  DRY_RUN=${DRY_RUN:-false}
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "RESOLUTION: $SOURCE_RESOLUTION -> ${TARGET_RESOLUTION_X}x${TARGET_RESOLUTION_Y}"
+    echo "FRAMERATE: $SOURCE_FRAMERATE -> $TARGET_FRAMERATE"
+    echo "BITRATE: $(numfmt --to=si --suffix=bps --format="%.1f" "$SOURCE_BITRATE") ($SOURCE_VCODEC) -> $(numfmt --to=si --suffix=bps --format="%.1f" "$TARGET_BITRATE")"
+    TARGET_FILE_SIZE_ESTIMATE="$(( $(stat -c %s "$INPUT_FILE_PATH") * TARGET_BITRATE / SOURCE_BITRATE ))"
+    echo "FILESIZE: \
+      $(numfmt --to=iec --suffix=B --format="%.1f" "$(stat -c %s "$INPUT_FILE_PATH")") -> \
+      $(numfmt --to=iec --suffix=B --format="%.1f" "$TARGET_FILE_SIZE_ESTIMATE") (estimate)"
+    echo "FFMPEG_CMD: $(echo "$FFMPEG_CMD" | tr -s ' ')"
+    exit 0
+  fi
 
   # Process the file
   time_ffmpeg_pre="$(date +%s)"
