@@ -8,6 +8,7 @@
 
 main() { # Takes a file path, creates a new file.
   INPUT_FILE_PATH="$1"
+  INPUT_FILE_SIZE="$(stat -c %s "$INPUT_FILE_PATH")"
 
   # We remux to mp4 if the input file is not already an mp4.
   # Some metadata are not available in other formats.
@@ -18,10 +19,11 @@ main() { # Takes a file path, creates a new file.
   fi
 
   # Set target file path
-  TARGET_FILE_PATH=${OUTFILE:-"${INPUT_FILE_PATH%.*}.av1.mp4"}
-  if [[ -f $TARGET_FILE_PATH ]]; then
-    echo "Error: Output file already exists."
-    exit 1
+  # If TARGET_FILE_PATH is not set, default to the input file with .mp4 extension
+  # If TARGET_FILE_PATH collides with the input file, temporarily use .av1.mp4 extension
+  TARGET_FILE_PATH=${TARGET_FILE_PATH:-"${INPUT_FILE_PATH%.*}.mp4"}
+  if [[ "$TARGET_FILE_PATH" == "$INPUT_FILE_PATH" ]]; then
+    TARGET_FILE_PATH="${INPUT_FILE_PATH%.*}.av1.mp4"
   fi
 
   # Detect hwaccel capabilities
@@ -54,7 +56,7 @@ main() { # Takes a file path, creates a new file.
 
   # Build the ffmpeg command
   if [[ "$HWACCEL_MODE" == "vaapi" ]]; then
-    FFMPEG_CMD="$(echo "ffmpeg \
+    FFMPEG_CMD="ffmpeg \
       -hide_banner \
       -nostdin \
       -loglevel error \
@@ -65,9 +67,9 @@ main() { # Takes a file path, creates a new file.
       -codec:v av1_vaapi \
       -r \"$TARGET_FRAMERATE\" \
       -b:v \"$TARGET_BITRATE\" \
-      \"$TARGET_FILE_PATH\" " | xargs)"
+      \"$TARGET_FILE_PATH\""
   elif [[ "$HWACCEL_MODE" == "cpu" ]]; then
-    FFMPEG_CMD="$(echo "ffmpeg \
+    FFMPEG_CMD="ffmpeg \
       -hide_banner \
       -nostdin \
       -loglevel error \
@@ -77,11 +79,10 @@ main() { # Takes a file path, creates a new file.
       -codec:v libsvtav1 \
       -r \"$TARGET_FRAMERATE\" \
       -b:v \"$TARGET_BITRATE\" \
-      \"$TARGET_FILE_PATH\" " | xargs)"
+      \"$TARGET_FILE_PATH\""
   else
     echo "Unknown HWACCEL_MODE $HWACCEL_MODE"; exit 1
   fi
-
 
   # Dry run if flagged
   DRY_RUN=${DRY_RUN:-false}
@@ -93,17 +94,35 @@ main() { # Takes a file path, creates a new file.
     echo "FILESIZE: \
       $(numfmt --to=iec --suffix=B --format="%.1f" "$(stat -c %s "$INPUT_FILE_PATH")") -> \
       $(numfmt --to=iec --suffix=B --format="%.1f" "$TARGET_FILE_SIZE_ESTIMATE") (estimate)"
-    echo "FFMPEG_CMD: $FFMPEG_CMD"
+    echo "FFMPEG_CMD: $(echo "$FFMPEG_CMD" | tr -s ' ')"
     exit 0
-  else
-    # Process the file
-    time_ffmpeg_pre="$(date +%s)"
-    bash -c "$FFMPEG_CMD"
-    time_ffmpeg_post="$(date +%s)"
-
-    PROCESS_DURATION="$(date -ud "@$((time_ffmpeg_post - time_ffmpeg_pre))" +'%H:%M:%S')"
-    SIZE_REDUCTION="$(numfmt --to=iec --format="%.2f" $(( "$(stat -c %s "$INPUT_FILE_PATH")" - "$(stat -c %s "$TARGET_FILE_PATH")" )))"
   fi
+
+  # Prevent unnecessary runs.
+  if [[ "$TARGET_FILE_PATH" == "${INPUT_FILE_PATH%.*}.av1.mp4" ]]; then
+    if [[
+      "${TARGET_RESOLUTION_X}x${TARGET_RESOLUTION_Y}" == "$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "${INPUT_FILE_PATH%.*}.mp4")" &&
+      "$TARGET_FRAMERATE" == "$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 "${INPUT_FILE_PATH%.*}.mp4")" &&
+      "av1" == "$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "${INPUT_FILE_PATH%.*}.mp4")"
+    ]]; then
+      echo "Target file \"$TARGET_FILE_PATH\" already matches resolution, framerate, and video codec. If you just want to reduce the bitrate, use this:"
+      echo "ffmpeg -hide_banner -nostdin -loglevel error -vaapi_device /dev/dri/renderD128 -i \"$INPUT_FILE_PATH\" -y -filter:v \"format=nv12,hwupload\" -codec:v av1_vaapi -b:v \"$TARGET_BITRATE\" \"$TARGET_FILE_PATH\""
+      exit 1
+    fi
+  fi
+
+
+  # Process the file
+  time_ffmpeg_pre="$(date +%s)"
+  bash -c "$FFMPEG_CMD"
+  if [[ "$TARGET_FILE_PATH" == "${INPUT_FILE_PATH%.*}.av1.mp4" ]]; then
+    TARGET_FILE_PATH="${INPUT_FILE_PATH%.*}.mp4"
+    mv "${INPUT_FILE_PATH%.*}.av1.mp4" "$TARGET_FILE_PATH"
+  fi
+  time_ffmpeg_post="$(date +%s)"
+
+  PROCESS_DURATION="$(date -ud "@$((time_ffmpeg_post - time_ffmpeg_pre))" +'%H:%M:%S')"
+  SIZE_REDUCTION="$(numfmt --to=iec --format="%.2f" $(( "$INPUT_FILE_SIZE" - "$(stat -c %s "$TARGET_FILE_PATH")" )))"
 
   # Log
   if [[ ! -f ffaart.log ]]; then
@@ -143,8 +162,8 @@ while [[ "$#" -gt 0 ]]; do
     --dry-run)
       DRY_RUN=true
       shift;;
-    --outfile)
-      OUTFILE="$2"
+    --output)
+      TARGET_FILE_PATH="$2"
       shift; shift;;
     --resolution)
       TARGET_RESOLUTION_X="$2"

@@ -10,7 +10,7 @@ An intelligent video transcoding utility that prioritizes perceptual quality whi
 
 ## Installation
 
-### Nix/OS
+### Install on Nix/OS
 Add this flake to your `flake.nix`:
 ```nix
 inputs.ffaart.url = "github:Jafner/ffaart";
@@ -25,6 +25,11 @@ environment.systemPackages = with pkgs; [
 home-manager.users.${username}.home.packages = [
   inputs.ffaart.default
 ];
+```
+
+### Temporarily install via Nix shell
+```nix
+nix shell github:Jafner/ffaart
 ```
 
 ### Manual
