@@ -108,6 +108,8 @@ main() { # Takes a file path, creates a new file.
     # DIFF_BITRATE="\"$SOURCE_BITRATE\" (\"$SOURCE_VCODEC\") -> \"$TARGET_BITRATE\""
     # TARGET_FILE_SIZE_ESTIMATE="$(( $(stat -c %s "$INPUT_FILE_PATH") * TARGET_BITRATE / SOURCE_BITRATE ))"
     # DIFF_FILESIZE="$(stat -c %s \"$INPUT_FILE_PATH\")" -> "$TARGET_FILE_SIZE_ESTIMATE" (estimate)"
+    PROCESS_DURATION="0"
+    SIZE_REDUCTION="0"
   else
     # Process the file
     time_ffmpeg_pre="$(date +%s)"
