@@ -28,11 +28,9 @@ main() { # Takes a file path, creates a new file.
 
   # Detect hwaccel capabilities
   # TODO: Support acceleration with non-vaapi, non-AMD hardware.
-  if ffmpeg -hide_banner -hwaccels | grep -q vaapi && [ -e "/dev/dri/renderD128" ]; then
-    HWACCEL_MODE="vaapi"
-  else
-    HWACCEL_MODE="cpu"
-    echo "Warning: Hardware acceleration not available. This will take a while."
+  if ! ffmpeg -hide_banner -hwaccels | grep -q vaapi && [ -e "/dev/dri/renderD128" ]; then
+    echo "Error: Required hardware acceleration not found: vaapi, /dev/dri/renderD128."
+    exit 1
   fi
 
   # Set target resolution
@@ -91,8 +89,7 @@ main() { # Takes a file path, creates a new file.
       "$TARGET_FRAMERATE" == "$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 "${INPUT_FILE_PATH%.*}.mp4")" &&
       "av1" == "$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "${INPUT_FILE_PATH%.*}.mp4")"
     ]]; then
-      echo "Target file \"$TARGET_FILE_PATH\" already matches resolution, framerate, and video codec. If you just want to reduce the bitrate, use this:"
-      echo "ffmpeg -hide_banner -nostdin -loglevel error -vaapi_device /dev/dri/renderD128 -i \"$INPUT_FILE_PATH\" -y -filter:v \"format=nv12,hwupload\" -codec:v av1_vaapi -b:v \"$TARGET_BITRATE\" \"$TARGET_FILE_PATH\""
+      echo "Skipping \"$TARGET_FILE_PATH\" already matches resolution, framerate, and video codec."
       exit 1
     fi
   fi
@@ -100,28 +97,29 @@ main() { # Takes a file path, creates a new file.
   # Dry run if flagged
   DRY_RUN=${DRY_RUN:-false}
   if [[ "$DRY_RUN" == "true" ]]; then
-    echo "RESOLUTION: $SOURCE_RESOLUTION -> ${TARGET_RESOLUTION_X}x${TARGET_RESOLUTION_Y}"
-    echo "FRAMERATE: $SOURCE_FRAMERATE -> $TARGET_FRAMERATE"
-    echo "BITRATE: $(numfmt --to=si --suffix=bps --format="%.1f" "$SOURCE_BITRATE") ($SOURCE_VCODEC) -> $(numfmt --to=si --suffix=bps --format="%.1f" "$TARGET_BITRATE")"
-    TARGET_FILE_SIZE_ESTIMATE="$(( $(stat -c %s "$INPUT_FILE_PATH") * TARGET_BITRATE / SOURCE_BITRATE ))"
-    echo "FILESIZE: \
-      $(numfmt --to=iec --suffix=B --format="%.1f" "$(stat -c %s "$INPUT_FILE_PATH")") -> \
-      $(numfmt --to=iec --suffix=B --format="%.1f" "$TARGET_FILE_SIZE_ESTIMATE") (estimate)"
-    echo "FFMPEG_CMD: $(echo "$FFMPEG_CMD" | tr -s ' ')"
-    exit 0
+    echo -n "$FFMPEG_CMD" | tr -s ' '
+    if [[ "$TARGET_FILE_PATH" == "${INPUT_FILE_PATH%.*}.av1.mp4" ]]; then
+      echo " && mv \"${INPUT_FILE_PATH%.*}.av1.mp4\" \"${INPUT_FILE_PATH%.*}.mp4\""
+    else
+      echo ""
+    fi
+    # DIFF_RESOLUTION="\"$SOURCE_RESOLUTION\" -> \"${TARGET_RESOLUTION_X}x${TARGET_RESOLUTION_Y}\""
+    # DIFF_FRAMERATE="\"$SOURCE_FRAMERATE\" -> \"$TARGET_FRAMERATE\""
+    # DIFF_BITRATE="\"$SOURCE_BITRATE\" (\"$SOURCE_VCODEC\") -> \"$TARGET_BITRATE\""
+    # TARGET_FILE_SIZE_ESTIMATE="$(( $(stat -c %s "$INPUT_FILE_PATH") * TARGET_BITRATE / SOURCE_BITRATE ))"
+    # DIFF_FILESIZE="$(stat -c %s \"$INPUT_FILE_PATH\")" -> "$TARGET_FILE_SIZE_ESTIMATE" (estimate)"
+  else
+    # Process the file
+    time_ffmpeg_pre="$(date +%s)"
+    bash -c "$FFMPEG_CMD" 2>/dev/null || (echo "Failed to process file: $INPUT_FILE_PATH"; exit 1)
+    if [[ "$TARGET_FILE_PATH" == "${INPUT_FILE_PATH%.*}.av1.mp4" ]]; then
+      TARGET_FILE_PATH="${INPUT_FILE_PATH%.*}.mp4"
+      mv "${INPUT_FILE_PATH%.*}.av1.mp4" "$TARGET_FILE_PATH"
+    fi
+    time_ffmpeg_post="$(date +%s)"
+    PROCESS_DURATION="$(date -ud "@$((time_ffmpeg_post - time_ffmpeg_pre))" +'%H:%M:%S')"
+    SIZE_REDUCTION="$(numfmt --to=iec --format="%.2f" $(( "$INPUT_FILE_SIZE" - "$(stat -c %s "$TARGET_FILE_PATH")" )))"
   fi
-
-  # Process the file
-  time_ffmpeg_pre="$(date +%s)"
-  bash -c "$FFMPEG_CMD"
-  if [[ "$TARGET_FILE_PATH" == "${INPUT_FILE_PATH%.*}.av1.mp4" ]]; then
-    TARGET_FILE_PATH="${INPUT_FILE_PATH%.*}.mp4"
-    mv "${INPUT_FILE_PATH%.*}.av1.mp4" "$TARGET_FILE_PATH"
-  fi
-  time_ffmpeg_post="$(date +%s)"
-
-  PROCESS_DURATION="$(date -ud "@$((time_ffmpeg_post - time_ffmpeg_pre))" +'%H:%M:%S')"
-  SIZE_REDUCTION="$(numfmt --to=iec --format="%.2f" $(( "$INPUT_FILE_SIZE" - "$(stat -c %s "$TARGET_FILE_PATH")" )))"
 
   # Log
   if [[ ! -f ffaart.log ]]; then
@@ -151,6 +149,27 @@ main() { # Takes a file path, creates a new file.
     echo -n "$SIZE_REDUCTION"
     echo ""
   } >> ffaart.log
+  exit 0
+}
+
+isvalid() {
+
+  # Input is a file.
+  if [[ ! -f "$1" ]]; then return 1; fi
+
+  # Input is a video.
+  if ! file -b --mime-type "$1" | grep -q '^video/'; then return 1; fi
+
+  # Input contains video stream encoded with supported codec.
+  FFPROBE_VCODEC=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name \
+    -of default=noprint_wrappers=1:nokey=1 "$1" 2>/dev/null)
+  if [[ -z "$FFPROBE_VCODEC" ]]; then return 1; fi
+  case "$FFPROBE_VCODEC" in
+    h264|hevc|av1) ;;
+    *) return 1;;
+  esac
+
+  return 0
 }
 
 while [[ "$#" -gt 0 ]]; do
@@ -187,4 +206,9 @@ done
 
 if [[ -z "$INPUT_FILE_PATH" ]]; then echo "No input file path found."; exit 1; fi
 
-main "$INPUT_FILE_PATH"
+if isvalid "$INPUT_FILE_PATH"; then
+  main "$INPUT_FILE_PATH"
+else
+  echo "Invalid input: $INPUT_FILE_PATH"
+  exit 1
+fi
