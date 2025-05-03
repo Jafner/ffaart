@@ -2,11 +2,14 @@
 
 An intelligent video transcoding utility that prioritizes perceptual quality while leveraging AV1 to reduce file sizes with minimal user input.
 
+```sh
+ffaart [--bitrate B] [--resolution X Y] [--framerate F] [--keep-original] [--dry-run] input.mp4
+```
+
 ## Features
 
 - Reduces video size while preserving perceptual quality.
-- Automatically determines resolution, framerate, and bitrate.
-- Supports explicitly specified resolution, framerate, and bitrate.
+- Sane defaults for resolution, framerate, and bitrate.
 
 ## Installation
 
@@ -42,34 +45,33 @@ chmod +x ~/.local/bin/ffaart
 
 ## Usage
 
-```sh
-ffaart [--bitrate B] [--resolution X Y] [--framerate F] [--dry-run] input.mp4
-```
-
 ### Options
 - `--bitrate <bitrate>`: Target bitrate (default: auto-calculated)
 - `--resolution <width> <height>`: Target resolution (default: source resolution)
 - `--framerate <fps>`: Target frame rate (default: source frame rate)
-- `--dry-run`: Show commands without executing
+- `--keep-original`: Keep original file (default: false)
+- `--dry-run`: Show command to run without executing
 
 ### Using `nix run`
 ```sh
-nix run github:Jafner/ffaart -- [--bitrate B] [--resolution X Y] [--framerate F] [--dry-run] input.mp4
+nix run github:Jafner/ffaart -- [--bitrate B] [--resolution X Y] [--framerate F] [--keep-original] [--dry-run] input.mp4
 ```
 
 ## Output
-Creates a new file with `.av1.mp4` suffix in the same directory as the input.
+1. **Replaces original file** with new, `mp4`-contained, `av1`-encoded file in the same directory as the input.
+  - If `--keep-original` is specified, the original file is kept as `${INPUT_FILE_PATH%.*}.original.${INPUT_FILE_PATH##*.}`.
+    E.g. `/home/user/Videos/MyVideo.original.mkv` (original extension is preserved.)
+2. **Logs** the result of the run to stdout in structured json.
 
 E.g.
 ```sh
-$ ffaart --bitrate 4M --resolution 1920 1080 --framerate 60 "$HOME/Videos/MyVideo.mp4"
-Target resolution defaulting to source resolution: 2560 x 1440
-Target framerate defaulting to source framerate: 60/1
+$ ffaart --bitrate 4M --resolution 1920 1080 "$HOME/Videos/MyVideo.mp4"
 ```
 
 ## Dependencies
-- nix
-- ffmpeg-full (with AV1 support)
+- ffmpeg (with AV1, VAAPI support)
+- Hardware accelerator that supports VAAPI & AV1 at `/dev/dri/renderD128`
+- nix (optional)
 
 ## License
 [MIT](LICENSE)
